@@ -4,9 +4,6 @@ var PlexAPI = require('plex-api');
 // plex config ---------------------------------------------------------------
 var plexConfig = require('../config/plex');
 
-// plex commands -------------------------------------------------------------
-var plexCommands = require('../commands/plex');
-
 // plex client ---------------------------------------------------------------
 var plex = new PlexAPI({
   hostname: plexConfig.hostname,
@@ -26,7 +23,7 @@ var plex = new PlexAPI({
 
 // plex constants ------------------------------------------------------------
 const PLEX_PLAY_START = 'http://' + plexConfig.hostname + ':' + plexConfig.port;
-const PLEX_PLAY_END = '?X-Plex-Token=' + plexConfig.token;
+const PLEX_PLAY_END = '?download=1&X-Plex-Token=' + plexConfig.token;
 
 // plex variables ------------------------------------------------------------
 var tracks = null;
@@ -46,7 +43,7 @@ var conn = null;
 
 // find song when provided with query string, offset, pagesize, and message
 function findSong(query, offset, pageSize, message) {
-  plex.query('/search/?type=10&query=' + query + '&X-Plex-Container-Start=' + offset + '&X-Plex-Container-Size=' + pageSize).then(function(res) {
+  plex.query('/search/?type=9&query=' + query + '&X-Plex-Container-Start=' + offset + '&X-Plex-Container-Size=' + pageSize).then(function(res) {
     tracks = res.MediaContainer.Metadata;
 
     var resultSize = res.MediaContainer.size;
@@ -67,12 +64,12 @@ function findSong(query, offset, pageSize, message) {
           artist = tracks[t].originalTitle;
         }
         else {
-          artist = tracks[t].grandparentTitle;
+          artist = tracks[t].parentTitle;
         }
         messageLines += (t+1) + ' - ' + artist + ' - ' + tracks[t].title + '\n';
       }
-      messageLines += '\n***!playsong (number)** to play your song.*';
-      messageLines += '\n***!nextpage** if the song you want isn\'t listed*';
+      messageLines += '\n***!playsong (number)** to play your album.*';
+      messageLines += '\n***!nextpage** if the album you want isn\'t listed*';
       message.reply(messageLines);
     }
     else {
@@ -86,24 +83,29 @@ function findSong(query, offset, pageSize, message) {
 // not sure if ill need this
 function addToQueue(songNumber, tracks, message) {
   if (songNumber > -1){
-    var key = tracks[songNumber].Media[0].Part[0].key;
-    var artist = '';
-    var title = tracks[songNumber].title;
-    if ('originalTitle' in tracks[songNumber]) {
-      artist = tracks[songNumber].originalTitle;
-    }
-    else {
-      artist = tracks[songNumber].grandparentTitle;
-    }
+    plex.query(tracks[songNumber].key).then(function(res) {
+      var albumtracks = res.MediaContainer.Metadata
+      for (var t = 0; t < albumtracks.length; t++) {
+        var songkey = albumtracks[t].Media[0].Part[0].key;
+        var artist = '';
+        var title = albumtracks[t].title;
+        if ('originalTitle' in albumtracks[t]) {
+          artist = albumtracks[t].originalTitle;
+        } else {
+          artist = albumtracks[t].grandparentTitle;
+        }
 
-    songQueue.push({'artist' : artist, 'title': title, 'key': key});
-    if (songQueue.length > 1) {
-      message.reply('You have added **' + artist + ' - ' + title + '** to the queue.\n\n***!viewqueue** to view the queue.*');
-    }
+        songQueue.push({'artist': artist, 'title': title, 'key': songkey});
+        console.log("Adding " + title + "to the queue which is now " + songQueue.length + " long " + isPlaying);
+      }
+      if (songQueue.length > 1) {
+        message.reply('You have added **' + artist + ' - ' + title + '** to the queue.\n\n***!viewqueue** to view the queue.*');
+      }
 
-    if (!isPlaying) {
-      playSong(message);
-    }
+      if (!isPlaying) {
+        playSong(message);
+      }
+    });
 
   }
   else {
@@ -121,6 +123,8 @@ function playSong(message) {
       var url = PLEX_PLAY_START + songQueue[0].key + PLEX_PLAY_END;
 
       isPlaying = true;
+
+      console.log("Playing from " + url)
 
       dispatcher = connection.playArbitraryInput(url).on('end', () => {
         songQueue.shift();
@@ -167,6 +171,7 @@ function playSong(message) {
 
 // run at end of songQueue / remove bot from voiceChannel
 function playbackCompletion(message) {
+  console.log("Playback complete " + message)
   conn.disconnect();
   voiceChannel.leave();
   isPlaying = false;
@@ -175,7 +180,7 @@ function playbackCompletion(message) {
 
 // plex commands -------------------------------------------------------------
 var commands = {
-  'plexTest' : {
+  'plextest' : {
     usage: '',
     description: 'test plex at bot start up to make sure everything is working',
     process: function() {
@@ -183,7 +188,7 @@ var commands = {
         console.log('name: ' + result.MediaContainer.friendlyName);
         console.log('v: ' + result.MediaContainer.version);
       }, function(err) {
-        console.log('ya done fucked up');
+        console.log('ya done fucked up', err);
       });
     }
   },
